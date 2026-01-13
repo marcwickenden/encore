@@ -102,10 +102,12 @@ func setupTraceProvider(ctx context.Context, cfg Config) (*sdktrace.TracerProvid
 		return nil, err
 	}
 
+	// Don't set service.name at resource level - each span will have
+	// its own service.name attribute from the Encore trace data
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceName("encore-traceproxy"),
-			semconv.ServiceVersion("0.1.0"),
+			semconv.TelemetrySDKName("encore-traceproxy"),
+			semconv.TelemetrySDKVersion("0.1.0"),
 		),
 	)
 	if err != nil {
