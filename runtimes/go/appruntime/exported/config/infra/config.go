@@ -15,6 +15,7 @@ type InfraConfig struct {
 	Auth             []*Auth                      `json:"auth,omitempty"`
 	ServiceDiscovery map[string]*ServiceDiscovery `json:"service_discovery,omitempty"`
 	Metrics          *Metrics                     `json:"metrics,omitempty"`
+	Tracing          *Tracing                     `json:"tracing,omitempty"`
 	SQLServers       []*SQLServer                 `json:"sql_servers,omitempty"`
 	Redis            map[string]*Redis            `json:"redis,omitempty"`
 	PubSub           []*PubSub                    `json:"pubsub,omitempty"`
@@ -209,6 +210,7 @@ func (i *InfraConfig) Validate(v *validator) {
 	ValidateChildMap(v, "service_discovery", i.ServiceDiscovery)
 	ValidateChildList(v, "object_storage", i.ObjectStorage)
 	v.ValidateChild("metrics", i.Metrics)
+	v.ValidateChild("tracing", i.Tracing)
 	ValidateChildList(v, "sql_servers", i.SQLServers)
 	ValidateChildMap(v, "redis", i.Redis)
 	ValidateChildList(v, "pubsub", i.PubSub)
@@ -454,6 +456,22 @@ type AWSCloudWatch struct {
 
 func (a *AWSCloudWatch) Validate(v *validator) {
 	v.ValidateField("namespace", NotZero(a.Namespace))
+}
+
+// Tracing configuration for exporting traces to an external collector.
+type Tracing struct {
+	// Endpoint is the URL to send traces to.
+	// For example: "http://traceproxy:4318" or "https://otel-collector.example.com:4318"
+	Endpoint EnvString `json:"endpoint,omitempty"`
+
+	// SamplingRate is the fraction of traces to sample (0.0 to 1.0).
+	// If not set, defaults to 1.0 (sample all traces).
+	SamplingRate *float64 `json:"sampling_rate,omitempty"`
+}
+
+func (t *Tracing) Validate(v *validator) {
+	v.ValidateEnvString("endpoint", t.Endpoint, "Trace Endpoint URL", NotZero[string])
+	v.ValidateField("sampling_rate", NilOr(t.SamplingRate, Between(0.0, 1.0)))
 }
 
 type SQLServer struct {
