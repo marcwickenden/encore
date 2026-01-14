@@ -76,6 +76,10 @@
     "type": "prometheus",
     "remote_write_url": "https://my-remote-write-url"
   },
+  "tracing": {
+    "endpoint": "http://otel-collector:4318",
+    "sampling_rate": 0.5
+  },
   "graceful_shutdown": {
     "total": 30,
     "handlers": 20,
