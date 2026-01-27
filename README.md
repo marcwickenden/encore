@@ -26,9 +26,10 @@
 
 **Use with AI coding assistants:**
 
-Add LLM instructions ([Encore.ts](./ts_llm_instructions.txt) / [Encore.go](./go_llm_instructions.txt)) to your project for better AI code suggestions. Use the [MCP server](https://encore.dev/docs/ts/ai-integration) to give your AI tools runtime context (query databases, call APIs, analyze traces). [Learn more](https://encore.dev/docs/ts/ai-integration)
+Add Encore's [LLM instructions](https://encore.dev/docs/ts/ai-integration) to your project, so your AI tools can understand your architecture, generate type-safe code, and use Encore's infrastructure primitives.
+Use the built-in [MCP server](https://encore.dev/docs/ts/ai-integration) to give your AI runtime context (query databases, call APIs, analyze traces) for seamless debugging and faster iterations. [Learn more](https://encore.dev/docs/ts/ai-integration)
 
-https://github.com/encoredev/encore/assets/78424526/4d066c76-9e6c-4c0e-b4c7-6b2ba6161dc8
+https://github.com/user-attachments/assets/461b902f-8fd3-46f1-a73c-0ebbfa789ce3
 
 _Encore's local development dashboard_
 
@@ -191,7 +192,7 @@ Start with low-risk, frequently-changed services to validate the approach. Learn
 
 ### Why teams use Encore
 
-- **Faster Development**: Encore streamlines the development process by providing guardrails, clear abstractions, and removing manual infrastructure tasks from development interations.
+- **Faster Development**: Encore streamlines the development process by providing guardrails, clear abstractions, and removing manual infrastructure tasks from development iterations.
 - **Scalability & Performance**: Encore simplifies building large-scale microservices applications that can handle growing user bases and demands, without the normal boilerplate and complexity.
 - **Control & Standardization**: Built-in tools like automated architecture diagrams, infrastructure tracking and approval workflows, make it easy for teams and leaders to get an overview of the entire application.
 - **Security & Compliance**: Encore Cloud helps ensure your application is secure and compliant by enforcing security standards like least privilege IAM, and provisioning infrastructure according to best practices for each cloud provider.
@@ -201,7 +202,7 @@ Start with low-risk, frequently-changed services to validate the approach. Learn
 
 Everything needed to develop and deploy Encore applications is Open Source, including the backend frameworks, parser, compiler, runtime, and CLI.
 
-This includes all code needed for local development, everything that runs in your application when it is deployed, and everything needed to generate a Docker image for your application, so you easily deploy your application anywhere. [Learn more in the docs](https://encore.dev/docs/ts/self-host/build).
+This includes all code needed for local development, everything that runs in your application when it is deployed, and everything needed to generate a Docker image for your application, so you can easily deploy your application anywhere. [Learn more in the docs](https://encore.dev/docs/ts/self-host/build).
 
 ## Join our growing developer community
 
