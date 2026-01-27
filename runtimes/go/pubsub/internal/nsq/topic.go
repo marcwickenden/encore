@@ -47,7 +47,7 @@ func (mgr *Manager) Matches(cfg *config.PubsubProvider) bool {
 func (mgr *Manager) NewTopic(providerCfg *config.PubsubProvider, _ types.TopicConfig, runtimeCfg *config.PubsubTopic) types.TopicImplementation {
 	return &topic{
 		mgr:       mgr,
-		name:      runtimeCfg.EncoreName,
+		name:      runtimeCfg.ProviderName,
 		addr:      providerCfg.NSQ.Host,
 		producer:  nil,
 		consumers: make(map[string]*nsq.Consumer),
