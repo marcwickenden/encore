@@ -1,8 +1,8 @@
 {
-  "app_id": "",
+  "app_id": "my-app",
   "app_slug": "my-app",
   "api_base_url": "https://my-app.com",
-  "env_id": "",
+  "env_id": "my-env",
   "env_name": "my-env",
   "env_type": "production",
   "env_cloud": "gcp",
@@ -103,6 +103,8 @@
       "RemoteWriteURL": "https://my-remote-write-url"
     }
   },
+  "trace_endpoint": "http://otel-collector:4318",
+  "trace_sampling_rate": 0.5,
   "gateways": [
     {
       "name": "api-gateway",

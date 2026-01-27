@@ -148,7 +148,9 @@ func parseInfraConfigEnv(infraCfgPath string) *Runtime {
 		log.Fatalf("encore runtime: fatal error: %v", err)
 	}
 
+	cfg.AppID = infraCfg.Metadata.AppID
 	cfg.AppSlug = infraCfg.Metadata.AppID
+	cfg.EnvID = infraCfg.Metadata.EnvName
 	cfg.EnvName = infraCfg.Metadata.EnvName
 	cfg.EnvType = infraCfg.Metadata.EnvType
 	cfg.EnvCloud = infraCfg.Metadata.Cloud
@@ -223,6 +225,14 @@ func parseInfraConfigEnv(infraCfgPath string) *Runtime {
 					infraCfg.Metrics.AWSCloudWatch.Namespace,
 				}
 			}
+		}
+	}
+
+	// Map tracing configuration
+	if infraCfg.Tracing != nil {
+		cfg.TraceEndpoint = infraCfg.Tracing.Endpoint.Value()
+		if infraCfg.Tracing.SamplingRate != nil {
+			cfg.TraceSamplingRate = infraCfg.Tracing.SamplingRate
 		}
 	}
 
@@ -459,7 +469,7 @@ func orDefault[T comparable](val T, def T) T {
 }
 
 // ParseRuntime parses the Encore runtime config.
-func ParseRuntime(runtimeConfig, runtimeConfigPath, processCfg, infraCfgPath, deployID string) *Runtime {
+func ParseRuntime(runtimeConfig, runtimeConfigPath, processCfg, infraCfgPath, deployID, traceEndpoint string) *Runtime {
 	var cfg *Runtime
 	if infraCfgPath != "" {
 		cfg = parseInfraConfigEnv(infraCfgPath)
@@ -480,6 +490,12 @@ func ParseRuntime(runtimeConfig, runtimeConfigPath, processCfg, infraCfgPath, de
 	// embedded in the runtime config
 	if deployID != "" {
 		cfg.DeployID = deployID
+	}
+
+	// If the environment trace endpoint is set, use that instead of the one
+	// embedded in the runtime config
+	if traceEndpoint != "" {
+		cfg.TraceEndpoint = traceEndpoint
 	}
 
 	return cfg

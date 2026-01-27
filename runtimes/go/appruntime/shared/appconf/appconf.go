@@ -32,5 +32,6 @@ func init() {
 		encoreenv.Get("ENCORE_PROCESS_CONFIG"),
 		encoreenv.Get("ENCORE_INFRA_CONFIG_PATH"),
 		encoreenv.Get("ENCORE_DEPLOY_ID"),
+		encoreenv.Get("ENCORE_TRACE_ENDPOINT"),
 	)
 }

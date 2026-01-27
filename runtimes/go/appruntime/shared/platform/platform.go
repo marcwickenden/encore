@@ -26,6 +26,9 @@ type Client struct {
 }
 
 func (c *Client) addAuthKey(req *http.Request) {
+	if len(c.runtime.AuthKeys) == 0 {
+		return
+	}
 	k := c.runtime.AuthKeys[0]
 	date := time.Now().UTC().Format(http.TimeFormat)
 	req.Header.Set("Date", date)

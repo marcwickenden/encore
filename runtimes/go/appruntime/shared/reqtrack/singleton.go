@@ -13,8 +13,9 @@ var Singleton *RequestTracker
 
 func init() {
 	var traceFactory traceprovider.Factory
-	tracingEnabled := appconf.Runtime.TraceEndpoint != "" && len(appconf.Runtime.AuthKeys) > 0
+	tracingEnabled := appconf.Runtime.TraceEndpoint != ""
 	if tracingEnabled {
+		logging.RootLogger.Info().Str("endpoint", appconf.Runtime.TraceEndpoint).Msg("tracing enabled")
 		traceFactory = &traceprovider.DefaultFactory{
 			SampleRate: appconf.Runtime.TraceSamplingRate,
 		}
