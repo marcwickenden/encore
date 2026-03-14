@@ -20,7 +20,7 @@ Yes, you're welcome to join the developer community on [Discord](https://encore.
 
 **Can I use Python with Encore?**
 
-Encore currently supports Go and TypeScript. Python support in on the [roadmap](https://encore.dev/roadmap) and will be available around Q1 2025.
+Encore currently supports Go and TypeScript. Python support in on the [roadmap](https://encore.dev/roadmap) and will be available in 2026.
 
 **Can mix TypeScript and Go in one application?**
 
@@ -28,7 +28,7 @@ Support for mixing languages in coming. Currently, if you want to use both TypeS
 
 **Can I use Azure / Digital Ocean?**
 
-Encore Cloud currently supports automating deployments to AWS and GCP. Azure support in on the [roadmap](https://encore.dev/roadmap) and will be available in 2025.
+Encore Cloud currently supports automating deployments to AWS and GCP. Azure support in on the [roadmap](https://encore.dev/roadmap) and will be available in 2026.
 
 If you want to use other cloud providers like Azure or Digital Ocean, you can follow the [self-hosting instructions](/docs/how-to/self-host).
 
@@ -44,7 +44,7 @@ Not right now. Encore currently supports AWS Fargate and EKS (along with CloudRu
 
 Right now Encore.ts officially supports Node and has experimental support for Bun. Deno support is on the way. Note that Encore.ts already provides performance improvements thanks to its Rust-based runtime. [Learn more](https://encore.dev/blog/event-loops).
 
-To enable the Bun experiment, add `"experiments": ["bun-runtime"]` to your `encore.app` file.
+To enable the Bun experiment, add `"experiments": ["bun-runtime"]` to your `encore.app` file, and add `"packageManager": "bun"` to your `package.json` file.
 
 ## IDE Integrations
 

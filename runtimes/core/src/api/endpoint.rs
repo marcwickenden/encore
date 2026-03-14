@@ -504,6 +504,13 @@ impl EndpointHandler {
         let span = trace_id.with_span(span_id);
         let parent_span = meta.parent_span_id.map(|sp| trace_id.with_span(sp));
 
+        let traced = if platform_seal_of_approval.is_some() {
+            true
+        } else {
+            meta.trace_sampled
+                .unwrap_or_else(|| self.shared.tracer.should_sample(&self.endpoint.name))
+        };
+
         let data = if let Some(direction) = stream_direction {
             let websocket_upgrade = Mutex::new(Some(
                 WebSocketUpgrade::from_request_parts(&mut parts, &()).await?,
@@ -554,6 +561,7 @@ impl EndpointHandler {
             is_platform_request: platform_seal_of_approval.is_some(),
             internal_caller,
             data,
+            traced,
         });
 
         Ok(request)

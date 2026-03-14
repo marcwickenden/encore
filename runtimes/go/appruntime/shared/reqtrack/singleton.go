@@ -15,10 +15,14 @@ func init() {
 	var traceFactory traceprovider.Factory
 	tracingEnabled := appconf.Runtime.TraceEndpoint != ""
 	if tracingEnabled {
-		logging.RootLogger.Info().Str("endpoint", appconf.Runtime.TraceEndpoint).Msg("tracing enabled")
-		traceFactory = &traceprovider.DefaultFactory{
-			SampleRate: appconf.Runtime.TraceSamplingRate,
+		// Use the new sampling config if set, otherwise fall back to the deprecated scalar rate.
+		samplingConfig := appconf.Runtime.TraceSamplingConfig
+		if len(samplingConfig) == 0 && appconf.Runtime.TraceSamplingRate != nil {
+			samplingConfig = map[string]float64{"_": *appconf.Runtime.TraceSamplingRate}
 		}
+
+		logging.RootLogger.Info().Str("endpoint", appconf.Runtime.TraceEndpoint).Msg("tracing enabled")
+		traceFactory = traceprovider.NewDefaultFactory(samplingConfig)
 	}
 
 	Singleton = New(logging.RootLogger, platform.Singleton, traceFactory)

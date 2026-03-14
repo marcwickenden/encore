@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::api::reqauth::meta::HeaderValueExt;
 use crate::api::{self, PValue};
-use crate::model::{LogField, LogFieldValue, Request, TraceEventId};
+use crate::model::{APICall, LogField, LogFieldValue, Request, TraceEventId};
 use crate::trace::eventbuf::EventBuffer;
 use crate::trace::log::TraceEvent;
-use crate::{model, objects, EncoreName};
+use crate::{model, objects, EncoreName, EndpointName};
 
 /// Represents a type of trace event.
 #[derive(Debug, Clone, Copy)]
@@ -58,17 +58,56 @@ static EVENT_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone)]
 pub struct Tracer {
     tx: Option<tokio::sync::mpsc::UnboundedSender<TraceEvent>>,
+    sampling_rate_config: super::TraceSamplingConfig,
 }
 
 pub static TRACE_VERSION: u16 = 17;
 
 impl Tracer {
-    pub(super) fn new(tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>) -> Self {
-        Self { tx: Some(tx) }
+    pub(super) fn new(
+        tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
+        sampling_rate_config: super::TraceSamplingConfig,
+    ) -> Self {
+        Self {
+            tx: Some(tx),
+            sampling_rate_config,
+        }
     }
 
     pub fn noop() -> Self {
-        Self { tx: None }
+        Self {
+            tx: None,
+            sampling_rate_config: super::TraceSamplingConfig::new(vec![], None),
+        }
+    }
+
+    /// Determines whether a new API request should be traced based on sampling rate.
+    /// Returns false if this is a noop tracer (no sender).
+    ///
+    /// Looks up the sampling rate: endpoint → service → default.
+    /// If no match is found, always sample.
+    pub fn should_sample(&self, endpoint: &EndpointName) -> bool {
+        if self.tx.is_none() {
+            return false;
+        }
+        match self.sampling_rate_config.lookup_api(endpoint) {
+            None => true,
+            Some(rate) => rand::random::<f64>() < rate,
+        }
+    }
+
+    /// Determines whether a new trace should be sampled based on the default sampling rate.
+    /// Returns false if this is a noop tracer (no sender).
+    ///
+    /// If no default rate is configured, always samples.
+    pub fn should_sample_default(&self) -> bool {
+        if self.tx.is_none() {
+            return false;
+        }
+        match self.sampling_rate_config.lookup_default() {
+            None => true,
+            Some(rate) => rand::random::<f64>() < rate,
+        }
     }
 }
 
@@ -149,6 +188,9 @@ impl Tracer {
     // so that's why we haven't implemented emitting TestStart/TestEnd etc.
     #[inline]
     pub fn request_span_start(&self, req: &model::Request, redact_details: bool) {
+        if !req.traced {
+            return;
+        }
         let mut eb = SpanStartEventData {
             parent: Parent::from(req),
             caller_event_id: req.caller_event_id,
@@ -283,8 +325,10 @@ impl Tracer {
 
     #[inline]
     pub fn request_span_end(&self, resp: &model::Response, redact_details: bool) {
-        // If the request has no span, we don't need to do anything.
         let req = resp.request.as_ref();
+        if !req.traced {
+            return;
+        }
 
         let mut eb = SpanEndEventData {
             parent: Parent::from(req),
@@ -375,11 +419,19 @@ impl Tracer {
     }
 }
 
+pub struct RPCCallEndData<'a> {
+    pub call: &'a APICall,
+    pub start_id: Option<TraceEventId>,
+    pub err: Option<&'a api::Error>,
+}
+
 impl Tracer {
     #[inline]
-    pub fn rpc_call_start(&self, call: &model::APICall) -> Option<TraceEventId> {
+    pub fn rpc_call_start(&self, call: &APICall) -> Option<TraceEventId> {
         let source = call.source.as_ref()?;
-
+        if !source.traced {
+            return None;
+        }
         let (service, endpoint) = (call.target.service(), call.target.endpoint());
         let mut eb = BasicEventData {
             correlation_event_id: None,
@@ -395,24 +447,21 @@ impl Tracer {
     }
 
     #[inline]
-    pub fn rpc_call_end(
-        &self,
-        call: &model::APICall,
-        start_event_id: TraceEventId,
-        err: Option<&api::Error>,
-    ) {
-        let Some(source) = &call.source else {
+    pub fn rpc_call_end(&self, data: RPCCallEndData) {
+        let Some(source) = data.call.source.as_ref() else {
             return;
         };
-
-        let (service, endpoint) = (call.target.service(), call.target.endpoint());
+        let Some(start_id) = data.start_id else {
+            return;
+        };
+        let (service, endpoint) = (data.call.target.service(), data.call.target.endpoint());
         let mut eb = BasicEventData {
-            correlation_event_id: Some(start_event_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + service.len() + endpoint.len(),
         }
         .into_eb();
 
-        eb.api_err_with_legacy_stack(err);
+        eb.api_err_with_legacy_stack(data.err);
 
         _ = self.send(EventType::RPCCallEnd, source.span, eb);
     }
@@ -425,14 +474,17 @@ pub struct PublishStartData<'a> {
 }
 
 pub struct PublishEndData<'a> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: &'a anyhow::Result<String>,
 }
 
 impl Tracer {
     #[inline]
-    pub fn pubsub_publish_start(&self, data: PublishStartData) -> TraceEventId {
+    pub fn pubsub_publish_start(&self, data: PublishStartData) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + 8 + data.topic.len() + data.payload.len(),
@@ -443,13 +495,16 @@ impl Tracer {
         eb.byte_string(data.payload);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::PubsubPublishStart, data.source.span, eb)
+        Some(self.send(EventType::PubsubPublishStart, data.source.span, eb))
     }
 
     #[inline]
     pub fn pubsub_publish_end(&self, data: PublishEndData) {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -467,14 +522,17 @@ pub struct DBQueryStartData<'a> {
 }
 
 pub struct DBQueryEndData<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub error: Option<&'a E>,
 }
 
 impl Tracer {
     #[inline]
-    pub fn db_query_start(&self, data: DBQueryStartData) -> TraceEventId {
+    pub fn db_query_start(&self, data: DBQueryStartData) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + data.query.len() + 32,
@@ -484,7 +542,7 @@ impl Tracer {
         eb.str(data.query);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::DBQueryStart, data.source.span, eb)
+        Some(self.send(EventType::DBQueryStart, data.source.span, eb))
     }
 
     #[inline]
@@ -492,8 +550,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -512,7 +573,7 @@ pub struct BucketObjectUploadStart<'a> {
 }
 
 pub struct BucketObjectUploadEnd<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: BucketObjectUploadEndResult<'a, E>,
 }
@@ -552,7 +613,13 @@ impl EventBuffer {
 
 impl Tracer {
     #[inline]
-    pub fn bucket_object_upload_start(&self, data: BucketObjectUploadStart) -> TraceEventId {
+    pub fn bucket_object_upload_start(
+        &self,
+        data: BucketObjectUploadStart,
+    ) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + 8 + data.bucket.len() + data.object.len(),
@@ -564,7 +631,7 @@ impl Tracer {
         eb.bucket_object_attrs(&data.attrs);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::BucketObjectUploadStart, data.source.span, eb)
+        Some(self.send(EventType::BucketObjectUploadStart, data.source.span, eb))
     }
 
     #[inline]
@@ -572,8 +639,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -602,7 +672,7 @@ pub struct BucketObjectDownloadStart<'a> {
 }
 
 pub struct BucketObjectDownloadEnd<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: BucketObjectDownloadEndResult<'a, E>,
 }
@@ -614,7 +684,13 @@ pub enum BucketObjectDownloadEndResult<'a, E> {
 
 impl Tracer {
     #[inline]
-    pub fn bucket_object_download_start(&self, data: BucketObjectDownloadStart) -> TraceEventId {
+    pub fn bucket_object_download_start(
+        &self,
+        data: BucketObjectDownloadStart,
+    ) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + 8 + data.bucket.len() + data.object.len(),
@@ -626,7 +702,7 @@ impl Tracer {
         eb.opt_str(data.version);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::BucketObjectDownloadStart, data.source.span, eb)
+        Some(self.send(EventType::BucketObjectDownloadStart, data.source.span, eb))
     }
 
     #[inline]
@@ -634,8 +710,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -667,7 +746,7 @@ pub struct BucketDeleteObjectEntry<'a> {
 }
 
 pub struct BucketDeleteObjectsEnd<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: BucketDeleteObjectsEndResult<'a, E>,
 }
@@ -682,10 +761,13 @@ impl Tracer {
     pub fn bucket_delete_objects_start<'a, O>(
         &self,
         data: BucketDeleteObjectsStart<'a, O>,
-    ) -> TraceEventId
+    ) -> Option<TraceEventId>
     where
         O: ExactSizeIterator<Item = BucketDeleteObjectEntry<'a>>,
     {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + 8 + data.bucket.len() + data.objects.len() * 8,
@@ -700,7 +782,7 @@ impl Tracer {
             eb.opt_str(obj.version);
         }
 
-        self.send(EventType::BucketDeleteObjectsStart, data.source.span, eb)
+        Some(self.send(EventType::BucketDeleteObjectsStart, data.source.span, eb))
     }
 
     #[inline]
@@ -708,8 +790,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -734,7 +819,7 @@ pub struct BucketListObjectsStart<'a> {
 }
 
 pub struct BucketListObjectsEnd<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: BucketListObjectsEndResult<'a, E>,
 }
@@ -746,7 +831,10 @@ pub enum BucketListObjectsEndResult<'a, E> {
 
 impl Tracer {
     #[inline]
-    pub fn bucket_list_objects_start(&self, data: BucketListObjectsStart) -> TraceEventId {
+    pub fn bucket_list_objects_start(&self, data: BucketListObjectsStart) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4
@@ -761,7 +849,7 @@ impl Tracer {
         eb.opt_str(data.prefix);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::BucketListObjectsStart, data.source.span, eb)
+        Some(self.send(EventType::BucketListObjectsStart, data.source.span, eb))
     }
 
     #[inline]
@@ -769,8 +857,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -800,7 +891,7 @@ pub struct BucketObjectGetAttrsStart<'a> {
 }
 
 pub struct BucketObjectGetAttrsEnd<'a, E> {
-    pub start_id: TraceEventId,
+    pub start_id: Option<TraceEventId>,
     pub source: &'a Request,
     pub result: BucketObjectGetAttrsEndResult<'a, E>,
 }
@@ -812,7 +903,13 @@ pub enum BucketObjectGetAttrsEndResult<'a, E> {
 
 impl Tracer {
     #[inline]
-    pub fn bucket_object_get_attrs_start(&self, data: BucketObjectGetAttrsStart) -> TraceEventId {
+    pub fn bucket_object_get_attrs_start(
+        &self,
+        data: BucketObjectGetAttrsStart,
+    ) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
         let mut eb = BasicEventData {
             correlation_event_id: None,
             extra_space: 4 + 4 + 8 + data.bucket.len() + data.object.len(),
@@ -824,7 +921,7 @@ impl Tracer {
         eb.opt_str(data.version);
         eb.nyi_stack_pcs();
 
-        self.send(EventType::BucketObjectGetAttrsStart, data.source.span, eb)
+        Some(self.send(EventType::BucketObjectGetAttrsStart, data.source.span, eb))
     }
 
     #[inline]
@@ -832,8 +929,11 @@ impl Tracer {
     where
         E: std::fmt::Display,
     {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
         let mut eb = BasicEventData {
-            correlation_event_id: Some(data.start_id),
+            correlation_event_id: Some(start_id),
             extra_space: 4 + 4 + 8,
         }
         .into_eb();
@@ -849,6 +949,76 @@ impl Tracer {
         }
 
         _ = self.send(EventType::BucketObjectGetAttrsEnd, data.source.span, eb);
+    }
+}
+
+/// Cache operation result for tracing.
+/// Values must match the Go trace parser's CacheOp_Result enum.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum CacheOpResult {
+    Unknown = 0,
+    Ok = 1,
+    NoSuchKey = 2,
+    Conflict = 3,
+    Err = 4,
+}
+
+pub struct CacheCallStartData<'a> {
+    pub source: &'a Request,
+    pub operation: &'static str,
+    pub is_write: bool,
+    pub keys: &'a [&'a str],
+}
+
+pub struct CacheCallEndData<'a, E> {
+    pub start_id: Option<TraceEventId>,
+    pub source: &'a Request,
+    pub result: CacheOpResult,
+    pub error: Option<&'a E>,
+}
+
+impl Tracer {
+    #[inline]
+    pub fn cache_call_start(&self, data: CacheCallStartData) -> Option<TraceEventId> {
+        if !data.source.traced {
+            return None;
+        }
+        let mut eb = BasicEventData {
+            correlation_event_id: None,
+            extra_space: 64 + data.operation.len() + data.keys.len() * 32,
+        }
+        .into_eb();
+
+        eb.str(data.operation);
+        eb.bool(data.is_write);
+        eb.nyi_stack_pcs();
+        eb.uvarint(data.keys.len() as u64);
+        for key in data.keys {
+            eb.str(key);
+        }
+
+        Some(self.send(EventType::CacheCallStart, data.source.span, eb))
+    }
+
+    #[inline]
+    pub fn cache_call_end<E>(&self, data: CacheCallEndData<E>)
+    where
+        E: std::fmt::Display,
+    {
+        let Some(start_id) = data.start_id else {
+            return;
+        };
+        let mut eb = BasicEventData {
+            correlation_event_id: Some(start_id),
+            extra_space: 32,
+        }
+        .into_eb();
+
+        eb.byte(data.result as u8);
+        eb.err_with_legacy_stack(data.error);
+
+        _ = self.send(EventType::CacheCallEnd, data.source.span, eb);
     }
 }
 

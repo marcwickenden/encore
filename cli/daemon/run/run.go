@@ -104,6 +104,9 @@ type StartParams struct {
 
 	// LogLevel overrides the default log level for the run.
 	LogLevel option.Option[string]
+
+	// ScrubSensitiveData enables scrubbing of sensitive data in local traces.
+	ScrubSensitiveData bool
 }
 
 // BrowserMode specifies how to open the browser when starting 'encore run'.
@@ -381,6 +384,8 @@ func (r *Run) buildAndStart(ctx context.Context, tracker *optracker.OpTracker, i
 
 		// Use the local JS runtime if this is a development build.
 		UseLocalJSRuntime: version.Channel == version.DevBuild,
+
+		DisableSensitiveScrubbing: !r.Params.ScrubSensitiveData,
 	}
 
 	// A context that is canceled when the proc exits.
@@ -393,12 +398,22 @@ func (r *Run) buildAndStart(ctx context.Context, tracker *optracker.OpTracker, i
 		}
 	}()
 
+	prepareResult, err := r.Builder.Prepare(procCtx, builder.PrepareParams{
+		Build:      buildInfo,
+		App:        r.App,
+		WorkingDir: r.Params.WorkingDir,
+	})
+	if err != nil {
+		return err
+	}
+
 	parse, err := r.Builder.Parse(procCtx, builder.ParseParams{
 		Build:       buildInfo,
 		App:         r.App,
 		Experiments: expSet,
 		WorkingDir:  r.Params.WorkingDir,
 		ParseTests:  false,
+		Prepare:     prepareResult,
 	})
 	if err != nil {
 		// Don't use the error itself in tracker.Fail, as it will lead to duplicate error output.

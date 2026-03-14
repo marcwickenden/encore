@@ -51,6 +51,10 @@ func (i *BuilderImpl) Close() error {
 	return nil
 }
 
+func (*BuilderImpl) Prepare(ctx context.Context, p builder.PrepareParams) (*builder.PrepareResult, error) {
+	return &builder.PrepareResult{}, nil
+}
+
 func (*BuilderImpl) Parse(ctx context.Context, p builder.ParseParams) (*builder.ParseResult, error) {
 	return etrace.Sync2(ctx, "", "v2builder.Parse", func(ctx context.Context) (res *builder.ParseResult, err error) {
 		defer func() {
@@ -74,15 +78,16 @@ func (*BuilderImpl) Parse(ctx context.Context, p builder.ParseParams) (*builder.
 				}),
 				EncoreRuntime: runtimesDir.Join("go"),
 
-				GOARCH:             p.Build.GOARCH,
-				GOOS:               p.Build.GOOS,
-				CgoEnabled:         p.Build.CgoEnabled,
-				StaticLink:         p.Build.StaticLink,
-				Debug:              p.Build.DebugMode,
-				BuildTags:          p.Build.BuildTags,
-				Revision:           p.Build.Revision,
-				UncommittedChanges: p.Build.UncommittedChanges,
-				MainPkg:            p.Build.MainPkg,
+				GOARCH:                    p.Build.GOARCH,
+				GOOS:                      p.Build.GOOS,
+				CgoEnabled:                p.Build.CgoEnabled,
+				StaticLink:                p.Build.StaticLink,
+				Debug:                     p.Build.DebugMode,
+				BuildTags:                 p.Build.BuildTags,
+				Revision:                  p.Build.Revision,
+				UncommittedChanges:        p.Build.UncommittedChanges,
+				MainPkg:                   p.Build.MainPkg,
+				DisableSensitiveScrubbing: p.Build.DisableSensitiveScrubbing,
 			},
 			MainModuleDir: paths.RootedFSPath(p.App.Root(), "."),
 			FS:            fset,
